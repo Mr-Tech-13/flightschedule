@@ -10,7 +10,7 @@ test('unwraps the multi-sheet result returned by read-excel-file v9', () => {
 test('imports section roles and overnight shifts from a weekly workbook', () => {
   const workbook = [{ sheet: 'Ramp Schedule', data: [
     ['Ramp Supervisor', 'MONDAY'], ['Sam Smith', '4:00', '12:00'],
-    ['Ramp Lead', 'MONDAY'], ['Jane Doe', '15:30', '0:30'],
+    ['Ramp Lead', 'MONDAY'], ['Jane Doe s.', '15:30', '0:30'],
     ['Ramp Agents (AM)', 'MONDAY'], ['OPEN LINE', '5:00', '13:00'],
     ['Alex Jones', 'VAC', 'VAC', '5:00', '13:00']
   ] }];
@@ -18,6 +18,8 @@ test('imports section roles and overnight shifts from a weekly workbook', () => 
   assert.equal(people.length, 3);
   assert.equal(people[0].role, 'supervisor');
   assert.equal(people[1].role, 'lead');
+  assert.equal(people[1].name, 'Jane Doe');
+  assert.equal(people[1].customsSeal, true);
   assert.equal(people[1].shifts[0].end, '2026-09-15T00:30:00');
   assert.equal(people[2].role, 'agent');
   assert.equal(people[2].shifts[0].date, '2026-09-15');

@@ -23,11 +23,13 @@ export function parseEmployeeRows(input, weekStart) {
   let role = 'agent';
 
   for (const row of rows) {
-    const name = String(row?.[0] ?? '').trim();
-    if (/^ramp supervisor/i.test(name)) { role = 'supervisor'; continue; }
-    if (/^ramp lead/i.test(name)) { role = 'lead'; continue; }
-    if (/^ramp agents?/i.test(name)) { role = 'agent'; continue; }
-    if (!name || /^(monday|open line|alaska|mx|sy)$/i.test(name)) continue;
+    const rawName = String(row?.[0] ?? '').trim();
+    if (/^ramp supervisor/i.test(rawName)) { role = 'supervisor'; continue; }
+    if (/^ramp lead/i.test(rawName)) { role = 'lead'; continue; }
+    if (/^ramp agents?/i.test(rawName)) { role = 'agent'; continue; }
+    if (!rawName || /^(monday|open line|alaska|mx|sy)$/i.test(rawName)) continue;
+    const customsSeal = /\s+s\.?$/i.test(rawName);
+    const name = rawName.replace(/\s+s\.?$/i, '').trim();
 
     const shifts = [];
     for (let dayOffset = 0; dayOffset < 7; dayOffset++) {
@@ -41,7 +43,7 @@ export function parseEmployeeRows(input, weekStart) {
       if (shiftEnd <= shiftStart) endDate.setDate(endDate.getDate() + 1);
       shifts.push({ date: workDate, start: `${workDate}T${shiftStart}:00`, end: `${endDate.toISOString().slice(0, 10)}T${shiftEnd}:00` });
     }
-    if (shifts.length) result.push({ name, role, shifts });
+    if (shifts.length) result.push({ name, role, customsSeal, shifts });
   }
   return result;
 }
