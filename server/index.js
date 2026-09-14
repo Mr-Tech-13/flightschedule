@@ -7,7 +7,7 @@ import { createWorker } from 'tesseract.js';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
-import { pool, id, migrate, tx } from './db.js';
+import { pool, id, migrate, tx, createDatabaseBackup } from './db.js';
 import { allow, authenticate, createAccount, ensureAdmin, login, logout, publicAccount } from './auth.js';
 import { parseFlightText } from './flight-parser.js';
 import { autoSchedule } from './scheduler.js';
@@ -73,7 +73,7 @@ app.get('/api/admin', allow('admin'), async(req,res,next)=>{try{const [accounts,
 app.post('/api/admin/accounts', allow('admin'), async(req,res,next)=>{try{res.status(201).json(await createAccount(req.body))}catch(e){next(e)}});
 app.post('/api/admin/airlines', allow('admin'), async(req,res,next)=>{try{const a=req.body;const r=await pool.query(`INSERT INTO airlines(code,name,lead_required,agent_required,arrival_lead_minutes,post_departure_minutes) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(code) DO UPDATE SET name=EXCLUDED.name,lead_required=EXCLUDED.lead_required,agent_required=EXCLUDED.agent_required,arrival_lead_minutes=EXCLUDED.arrival_lead_minutes,post_departure_minutes=EXCLUDED.post_departure_minutes RETURNING *`,[a.code.toUpperCase(),a.name,Number(a.leadRequired),Number(a.agentRequired),Number(a.arrivalLeadMinutes||15),Number(a.postDepartureMinutes||10)]);res.json(r.rows[0])}catch(e){next(e)}});
 app.post('/api/issues', async(req,res,next)=>{try{const i=req.body;const r=await pool.query('INSERT INTO issues(id,title,detail,reported_by) VALUES($1,$2,$3,$4) RETURNING *',[id(),i.title,i.detail,req.account.id]);if(process.env.DISCORD_WEBHOOK_URL) fetch(process.env.DISCORD_WEBHOOK_URL,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({content:`FlightDeck issue: **${i.title}**\n${i.detail}`})}).catch(()=>{});res.status(201).json(r.rows[0])}catch(e){next(e)}});
-app.post('/api/admin/backup', allow('admin'), async(req,res,next)=>{try{const dir=path.join(root,'data','backups');await fs.mkdir(dir,{recursive:true});const tables=['settings','accounts','employees','employee_qualifications','shifts','callouts','airlines','flights','assignments','imports','issues'];const backup={format:'flightdeck-json-v1',createdAt:new Date().toISOString(),tables:{}};for(const table of tables)backup.tables[table]=(await pool.query(`SELECT * FROM ${table}`)).rows;const stamp=new Date().toISOString().replace(/[:.]/g,'-');await fs.writeFile(path.join(dir,`manual-${stamp}.json`),JSON.stringify(backup));res.status(201).json({message:'Manual backup created in data/backups.'})}catch(e){next(e)}});
+app.post('/api/admin/backup', allow('admin'), async(req,res,next)=>{try{const filename=await createDatabaseBackup('manual');res.status(201).json({message:`Backup created: ${filename}`})}catch(e){next(e)}});
 
 app.use(express.static(path.join(root,'public'))); app.get('/{*splat}',(_,res)=>res.sendFile(path.join(root,'public','index.html')));
 app.use((err,req,res,next)=>{console.error(err);res.status(err.code==='LIMIT_FILE_SIZE'?413:400).json({error:process.env.NODE_ENV==='production'?'The request could not be completed':err.message})});
@@ -88,4 +88,6 @@ function parseCsv(text){const rows=[];let row=[],cell='',quoted=false;for(let i=
 await fs.mkdir(path.join(root,'data/uploads'),{recursive:true}); await migrate(); await ensureAdmin();
 const pruneAssignments=()=>pool.query(`DELETE FROM assignments a USING flights f WHERE a.flight_id=f.id AND f.service_date < current_date-1`).catch(console.error);
 await pruneAssignments(); setInterval(pruneAssignments,6*60*60*1000).unref();
-const port=Number(process.env.PORT||3000); app.listen(port,'0.0.0.0',()=>console.log(`FlightDeck listening on ${port}`));
+function scheduleNightlyBackup(){const now=new Date(),next=new Date(now);next.setHours(2,0,0,0);if(next<=now)next.setDate(next.getDate()+1);setTimeout(async()=>{try{await createDatabaseBackup('nightly')}catch(error){console.error('Nightly backup failed',error)}scheduleNightlyBackup()},next-now).unref()}
+scheduleNightlyBackup();
+const port=Number(process.env.PORT||3000),host=process.env.HOST||'0.0.0.0';app.listen(port,host,()=>console.log(`FlightDeck listening on http://${host}:${port}`));

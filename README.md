@@ -4,17 +4,31 @@ A self-hosted, mobile-first flight and ground-crew scheduling application. Fligh
 
 ## Start
 
-1. Copy `.env.example` to `.env`.
-2. Replace both password values with long, unique random values.
-3. Run `docker compose up -d`.
-4. Open `http://localhost:3000` and sign in with the configured admin account.
+1. Run `npm install`.
+2. Run `npm start`.
+3. Open `http://localhost:3000`.
+4. On the first start, read the generated login from `data/initial-admin-password.txt`.
 
-The application uses published Node and PostgreSQL images; Compose does not build an image. Source code is mounted into the Node container, so recreating or restarting the app container picks up code changes. Dependencies are installed into a Docker-managed volume when the container starts.
+The database is embedded in the Node process and created automatically in `data/flightdeck.pgdata`. No database server, Docker service, database URL, or `.env` file is required. Migrations run automatically on every startup.
+
+## Local npm development
+
+For automatic restart after source changes, use:
+
+```bash
+npm run dev
+```
+
+The app listens on all network interfaces. To test from a phone on the same network, use the computer's LAN address and ensure the firewall permits the application port, for example `http://192.168.1.20:3000`.
+
+## Docker deployment
+
+Run `docker compose up -d`. Compose uses a published Node image and does not build an image. It runs the same `npm start` command and mounts the same `data` directory for persistence. Configuration through `.env` is optional; see `.env.example` for available overrides.
 
 ## Persistent and private data
 
-- `data/postgres/` contains the database.
-- `data/backups/` contains nightly PostgreSQL backups and manual JSON backups.
+- `data/flightdeck.pgdata/` contains the embedded database.
+- `data/backups/` contains nightly and manual compressed database backups.
 - `private/` is ignored by Git and intended for source schedules and screenshots.
 
 Nightly backups retain the latest 30 days. Copy the entire `data` directory to separate storage regularly; a backup kept only on the same server is not protection from disk failure.
@@ -32,6 +46,5 @@ Image imports use OCR and always require review. Excel/CSV imports are more reli
 ## Production notes
 
 - Put the app behind a TLS-enabled reverse proxy and set `COOKIE_SECURE=true`.
-- Do not expose PostgreSQL publicly.
 - There is no public account registration. Administrators create scheduler and viewer accounts.
 - Discord issue notifications are enabled by setting `DISCORD_WEBHOOK_URL`.

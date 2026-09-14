@@ -1,13 +1,20 @@
-import pg from 'pg';
+import { PGlite } from '@electric-sql/pglite';
 import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 
-const { Pool } = pg;
-const timezone = /^[A-Za-z_+\/-]+$/.test(process.env.DEFAULT_TIMEZONE || '') ? process.env.DEFAULT_TIMEZONE : 'America/New_York';
-export const pool = new Pool({ connectionString: process.env.DATABASE_URL, options: `-c timezone=${timezone}` });
+const dataDir = path.resolve(process.env.DATABASE_PATH || './data/flightdeck.pgdata');
+await fs.mkdir(path.dirname(dataDir), { recursive: true });
+const database = await PGlite.create(dataDir);
+
+export const pool = {
+  query: (sql, params = []) => database.query(sql, params),
+  exec: sql => database.exec(sql)
+};
 export const id = () => crypto.randomUUID();
 
 export async function migrate() {
-  await pool.query(`
+  await pool.exec(`
     CREATE TABLE IF NOT EXISTS settings (
       key text PRIMARY KEY,
       value jsonb NOT NULL
@@ -117,12 +124,26 @@ export async function migrate() {
     CREATE INDEX IF NOT EXISTS idx_shifts_date ON shifts(work_date);
     CREATE INDEX IF NOT EXISTS idx_assignments_flight ON assignments(flight_id);
   `);
+  await pool.query("SELECT set_config('TimeZone',$1,false)", [process.env.DEFAULT_TIMEZONE || 'America/New_York']);
   await pool.query("INSERT INTO settings(key,value) VALUES ('station', $1), ('timezone', $2) ON CONFLICT DO NOTHING", [JSON.stringify(process.env.DEFAULT_STATION || 'Station'), JSON.stringify(process.env.DEFAULT_TIMEZONE || 'America/New_York')]);
 }
 
 export async function tx(fn) {
-  const client = await pool.connect();
-  try { await client.query('BEGIN'); const result = await fn(client); await client.query('COMMIT'); return result; }
-  catch (error) { await client.query('ROLLBACK'); throw error; }
-  finally { client.release(); }
+  return database.transaction(transaction => fn({ query: (sql, params = []) => transaction.query(sql, params) }));
+}
+
+export async function createDatabaseBackup(prefix = 'nightly') {
+  const backupDir = path.resolve('./data/backups');
+  await fs.mkdir(backupDir, { recursive: true });
+  const blob = await database.dumpDataDir('gzip');
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const filename = `${prefix}-${stamp}.tar.gz`;
+  await fs.writeFile(path.join(backupDir, filename), Buffer.from(await blob.arrayBuffer()));
+  const files = await fs.readdir(backupDir, { withFileTypes: true });
+  const cutoff = Date.now() - 30 * 86400000;
+  await Promise.all(files.filter(file => file.isFile() && /^(nightly|manual)-.*\.tar\.gz$/.test(file.name)).map(async file => {
+    const target = path.join(backupDir, file.name);
+    if ((await fs.stat(target)).mtimeMs < cutoff) await fs.unlink(target);
+  }));
+  return filename;
 }
