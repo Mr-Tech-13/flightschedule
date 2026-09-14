@@ -9,13 +9,13 @@ const hashToken = token => crypto.createHash('sha256').update(token).digest('hex
 
 export async function ensureAdmin() {
   const username = process.env.ADMIN_USERNAME || 'admin';
+  const credentialFile = path.resolve('./data/initial-admin-password.txt');
+  const configured = process.env.ADMIN_PASSWORD;
   const exists = await pool.query('SELECT 1 FROM accounts LIMIT 1');
-  if (!exists.rowCount) {
-    const configured = process.env.ADMIN_PASSWORD;
+  if (exists.rows.length === 0) {
     const password = configured && !['admin','change-me','change-me-now'].includes(configured) ? configured : crypto.randomBytes(18).toString('base64url');
     await pool.query('INSERT INTO accounts(id,username,password_hash,role) VALUES($1,$2,$3,$4)', [id(), username.toLowerCase(), await bcrypt.hash(password, 12), 'admin']);
     if (password !== configured) {
-      const credentialFile = path.resolve('./data/initial-admin-password.txt');
       await fs.mkdir(path.dirname(credentialFile), { recursive: true });
       await fs.writeFile(credentialFile, `Username: ${username}\nPassword: ${password}\n`, { mode: 0o600 });
     }
@@ -42,7 +42,7 @@ export async function authenticate(req, res, next) {
   const token = req.cookies[COOKIE];
   if (!token) return res.status(401).json({ error: 'Authentication required' });
   const result = await pool.query(`SELECT a.id,a.username,a.role FROM sessions s JOIN accounts a ON a.id=s.account_id WHERE s.token_hash=$1 AND s.expires_at>now() AND a.active=true`, [hashToken(token)]);
-  if (!result.rowCount) return res.status(401).json({ error: 'Session expired' });
+  if (result.rows.length === 0) return res.status(401).json({ error: 'Session expired' });
   req.account = result.rows[0]; next();
 }
 

@@ -5,6 +5,20 @@ import path from 'node:path';
 
 const dataDir = path.resolve(process.env.DATABASE_PATH || './data/flightdeck.pgdata');
 await fs.mkdir(path.dirname(dataDir), { recursive: true });
+const instanceLockPath = `${dataDir}.lock`;
+let instanceLock;
+try {
+  instanceLock = await fs.open(instanceLockPath, 'wx', 0o600);
+} catch (error) {
+  if (error.code !== 'EEXIST') throw error;
+  const recordedPid = Number(await fs.readFile(instanceLockPath, 'utf8').catch(() => 0));
+  let running = false;
+  if (recordedPid > 0) { try { process.kill(recordedPid, 0); running = true; } catch {} }
+  if (running) throw new Error(`FlightDeck is already running with process ${recordedPid}. Stop it before starting another copy.`);
+  await fs.unlink(instanceLockPath);
+  instanceLock = await fs.open(instanceLockPath, 'wx', 0o600);
+}
+await instanceLock.writeFile(String(process.pid));
 const database = await PGlite.create(dataDir);
 
 export const pool = {
@@ -123,6 +137,7 @@ export async function migrate() {
     CREATE INDEX IF NOT EXISTS idx_flights_date ON flights(service_date);
     CREATE INDEX IF NOT EXISTS idx_shifts_date ON shifts(work_date);
     CREATE INDEX IF NOT EXISTS idx_assignments_flight ON assignments(flight_id);
+    ALTER TABLE employees ADD COLUMN IF NOT EXISTS tow_qualified boolean NOT NULL DEFAULT false;
   `);
   await pool.query("SELECT set_config('TimeZone',$1,false)", [process.env.DEFAULT_TIMEZONE || 'America/New_York']);
   await pool.query("INSERT INTO settings(key,value) VALUES ('station', $1), ('timezone', $2) ON CONFLICT DO NOTHING", [JSON.stringify(process.env.DEFAULT_STATION || 'Station'), JSON.stringify(process.env.DEFAULT_TIMEZONE || 'America/New_York')]);
@@ -146,4 +161,10 @@ export async function createDatabaseBackup(prefix = 'nightly') {
     if ((await fs.stat(target)).mtimeMs < cutoff) await fs.unlink(target);
   }));
   return filename;
+}
+
+export async function closeDatabase() {
+  await database.close();
+  await instanceLock.close().catch(() => {});
+  await fs.unlink(instanceLockPath).catch(() => {});
 }
