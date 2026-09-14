@@ -138,6 +138,9 @@ export async function migrate() {
     CREATE INDEX IF NOT EXISTS idx_shifts_date ON shifts(work_date);
     CREATE INDEX IF NOT EXISTS idx_assignments_flight ON assignments(flight_id);
     ALTER TABLE employees ADD COLUMN IF NOT EXISTS tow_qualified boolean NOT NULL DEFAULT false;
+    ALTER TABLE employees ADD COLUMN IF NOT EXISTS customs_seal boolean NOT NULL DEFAULT false;
+    ALTER TABLE airlines ADD COLUMN IF NOT EXISTS international boolean NOT NULL DEFAULT false;
+    ALTER TABLE flights ADD COLUMN IF NOT EXISTS international boolean NOT NULL DEFAULT false;
   `);
   await pool.query("SELECT set_config('TimeZone',$1,false)", [process.env.DEFAULT_TIMEZONE || 'America/New_York']);
   await pool.query("INSERT INTO settings(key,value) VALUES ('station', $1), ('timezone', $2) ON CONFLICT DO NOTHING", [JSON.stringify(process.env.DEFAULT_STATION || 'Station'), JSON.stringify(process.env.DEFAULT_TIMEZONE || 'America/New_York')]);
