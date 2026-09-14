@@ -1,4 +1,5 @@
 import { id, tx } from './db.js';
+import { eligible } from './scheduler-eligibility.js';
 
 export async function autoSchedule(serviceDate) {
   return tx(async client => {
@@ -28,13 +29,6 @@ export async function autoSchedule(serviceDate) {
   });
 }
 
-function eligible(e, role, airline, international) {
-  if (!e.eligible_roles.includes(role)) return false;
-  if (international && !e.customs_seal) return false;
-  const qualification = e.qualifications.find(q => q.airline === airline);
-  if (role === 'lead' && qualification && !qualification.can_lead) return false;
-  return true;
-}
 function score(e, airline) { const qualification=e.qualifications.find(q=>q.airline===airline);return (qualification?Number(qualification.priority)+50:50)+(e.primary_role==='lead'?10:0); }
 function overlaps(a,b) { return a.start < b.end && b.start < a.end; }
 function windowFor(f) {
