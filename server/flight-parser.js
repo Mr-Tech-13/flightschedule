@@ -1,7 +1,6 @@
-const timePattern = /\b(\d{3,4})\b/;
 const flightPattern = /\b([A-Z]{2})\s*(\d{1,4}[A-Z]?)\s*([A-Z]{3})\s*(\d{3,4})\b/i;
 
-function isoAt(date, hhmm, timezone = 'local') {
+function isoAt(date, hhmm) {
   const digits = hhmm.padStart(4, '0');
   const hour = Number(digits.slice(0, 2));
   const minute = Number(digits.slice(2));

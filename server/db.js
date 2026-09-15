@@ -13,8 +13,8 @@ try {
   if (error.code !== 'EEXIST') throw error;
   const recordedPid = Number(await fs.readFile(instanceLockPath, 'utf8').catch(() => 0));
   let running = false;
-  if (recordedPid > 0) { try { process.kill(recordedPid, 0); running = true; } catch {} }
-  if (running) throw new Error(`FlightDeck is already running with process ${recordedPid}. Stop it before starting another copy.`);
+  if (recordedPid > 0) { try { process.kill(recordedPid, 0); running = true; } catch { /* Stale lock file. */ } }
+  if (running) throw new Error(`FlightDeck is already running with process ${recordedPid}. Stop it before starting another copy.`, { cause: error });
   await fs.unlink(instanceLockPath);
   instanceLock = await fs.open(instanceLockPath, 'wx', 0o600);
 }

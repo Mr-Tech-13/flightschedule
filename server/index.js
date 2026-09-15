@@ -92,7 +92,7 @@ app.post('/api/issues', async(req,res,next)=>{try{const i=req.body,detail=String
 app.post('/api/admin/backup', allow('admin'), async(req,res,next)=>{try{const filename=await createDatabaseBackup('manual');res.status(201).json({message:`Backup created: ${filename}`})}catch(e){next(e)}});
 
 app.use(express.static(path.join(root,'public'))); app.get('/{*splat}',(_,res)=>res.sendFile(path.join(root,'public','index.html')));
-app.use((err,req,res,next)=>{console.error(err);res.status(err.code==='LIMIT_FILE_SIZE'?413:400).json({error:process.env.NODE_ENV==='production'?'The request could not be completed':err.message})});
+app.use((err,req,res,_next)=>{console.error(err);res.status(err.code==='LIMIT_FILE_SIZE'?413:400).json({error:process.env.NODE_ENV==='production'?'The request could not be completed':err.message})});
 
 function parseCsv(text){const rows=[];let row=[],cell='',quoted=false;for(let i=0;i<text.length;i++){const ch=text[i];if(ch==='"'){if(quoted&&text[i+1]==='"'){cell+='"';i++}else quoted=!quoted}else if(ch===','&&!quoted){row.push(cell);cell=''}else if((ch==='\n'||ch==='\r')&&!quoted){if(ch==='\r'&&text[i+1]==='\n')i++;row.push(cell);if(row.some(x=>x!==''))rows.push(row);row=[];cell=''}else cell+=ch}row.push(cell);if(row.some(x=>x!==''))rows.push(row);return rows}
 

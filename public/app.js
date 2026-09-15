@@ -13,7 +13,7 @@ const themeButton=document.createElement('button');themeButton.id='themeToggle';
 function updateThemeButton(){const dark=document.documentElement.dataset.theme==='dark';themeButton.textContent=dark?'☀ Light':'☾ Dark';themeButton.setAttribute('aria-label',`Switch to ${dark?'light':'dark'} mode`);document.querySelector('meta[name="theme-color"]')?.setAttribute('content',dark?'#101714':'#f4f5f0')}
 themeButton.onclick=()=>{document.documentElement.dataset.theme=document.documentElement.dataset.theme==='dark'?'light':'dark';localStorage.setItem('flightdeck-theme',document.documentElement.dataset.theme);updateThemeButton()};$('#logoutButton').before(themeButton);updateThemeButton();
 
-async function boot(){try{await api('/api/me');$('#login').hidden=true;$('#app').hidden=false;$('#datePicker').value=state.date;await loadBoard()}catch{}}
+async function boot(){try{await api('/api/me');$('#login').hidden=true;$('#app').hidden=false;$('#datePicker').value=state.date;await loadBoard()}catch{/* Remain on the login screen when there is no active session. */}}
 $('#loginForm').addEventListener('submit',async e=>{e.preventDefault();try{await api('/api/auth/login',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});$('#login').hidden=true;$('#app').hidden=false;$('#datePicker').value=state.date;await loadBoard()}catch(x){$('#loginError').textContent=x.message}});
 $('#logoutButton').onclick=async()=>{await api('/api/auth/logout',{method:'POST'});location.reload()};
 $('#menuButton').onclick=()=>document.body.classList.toggle('nav-open');

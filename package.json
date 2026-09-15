@@ -6,7 +6,10 @@
   "scripts": {
     "start": "node --env-file-if-exists=.env server/index.js",
     "dev": "node --env-file-if-exists=.env --watch server/index.js",
-    "test": "node --test"
+    "build": "node --check server/index.js && node --check server/auth.js && node --check server/db.js && node --check server/employee-schedule-parser.js && node --check server/flight-parser.js && node --check server/image-schedule-parser.js && node --check server/scheduler.js && node --check server/scheduler-eligibility.js && node --check public/app.js",
+    "lint": "eslint .",
+    "test": "node --test",
+    "check": "npm run lint && npm run build && npm test"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.3.14",
@@ -17,5 +20,9 @@
     "multer": "^2.0.2",
     "read-excel-file": "^9.3.10",
     "tesseract.js": "^6.0.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.10.0"
   }
 }
