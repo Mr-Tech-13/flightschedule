@@ -7,7 +7,7 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3000
-      DATABASE_PATH: /app/data/flightdeck.pgdata
+      DATABASE_PATH: /app/data/flightschedule.pgdata
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       DEFAULT_STATION: ${DEFAULT_STATION:-Station}

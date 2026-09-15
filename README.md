@@ -1,6 +1,6 @@
-# FlightDeck Scheduler
+# FlightSchedule
 
-A self-hosted, mobile-first flight and ground-crew scheduling application. FlightDeck imports weekly employee availability and pasted airline schedules, supports manual flight and crew changes, and automatically fills configurable lead and agent requirements.
+A self-hosted, mobile-first flight and ground-crew scheduling application. FlightSchedule imports weekly employee availability and pasted airline schedules, supports manual flight and crew changes, and automatically fills configurable lead and agent requirements.
 
 ## Start
 
@@ -9,7 +9,7 @@ A self-hosted, mobile-first flight and ground-crew scheduling application. Fligh
 3. Open `http://localhost:3000`.
 4. On the first start, read the generated login from `data/initial-admin-password.txt`.
 
-The database is embedded in the Node process and created automatically in `data/flightdeck.pgdata`. No database server, Docker service, database URL, or `.env` file is required. Migrations run automatically on every startup.
+The database is embedded in the Node process and created automatically in `data/flightschedule.pgdata`. No database server, Docker service, database URL, or `.env` file is required. Migrations run automatically on every startup.
 
 ## Local npm development
 
@@ -27,7 +27,7 @@ Run `docker compose up -d`. Compose uses a published Node image and does not bui
 
 ## Persistent and private data
 
-- `data/flightdeck.pgdata/` contains the embedded database.
+- `data/flightschedule.pgdata/` contains the embedded database.
 - `data/backups/` contains nightly and manual compressed database backups.
 - `private/` is ignored by Git and intended for source schedules and screenshots.
 

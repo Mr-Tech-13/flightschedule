@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { id, pool } from './db.js';
 
-const COOKIE = 'flightdeck_session';
+const COOKIE = 'flightschedule_session';
 const hashToken = token => crypto.createHash('sha256').update(token).digest('hex');
 
 export async function ensureAdmin() {

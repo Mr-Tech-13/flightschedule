@@ -3,7 +3,11 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-const dataDir = path.resolve(process.env.DATABASE_PATH || './data/flightdeck.pgdata');
+const dataDir = path.resolve(process.env.DATABASE_PATH || './data/flightschedule.pgdata');
+const legacyDataDir = path.resolve('./data', ['flight', 'deck.pgdata'].join(''));
+if (legacyDataDir !== dataDir && !(await fs.stat(dataDir).catch(() => null)) && await fs.stat(legacyDataDir).catch(() => null)) {
+  await fs.rename(legacyDataDir, dataDir);
+}
 await fs.mkdir(path.dirname(dataDir), { recursive: true });
 const instanceLockPath = `${dataDir}.lock`;
 let instanceLock;
@@ -14,7 +18,7 @@ try {
   const recordedPid = Number(await fs.readFile(instanceLockPath, 'utf8').catch(() => 0));
   let running = false;
   if (recordedPid > 0) { try { process.kill(recordedPid, 0); running = true; } catch { /* Stale lock file. */ } }
-  if (running) throw new Error(`FlightDeck is already running with process ${recordedPid}. Stop it before starting another copy.`, { cause: error });
+  if (running) throw new Error(`FlightSchedule is already running with process ${recordedPid}. Stop it before starting another copy.`, { cause: error });
   await fs.unlink(instanceLockPath);
   instanceLock = await fs.open(instanceLockPath, 'wx', 0o600);
 }
