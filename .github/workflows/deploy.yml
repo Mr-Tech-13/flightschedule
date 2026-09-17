@@ -1,0 +1,37 @@
+name: Deploy to Rubberducky
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: flightschedule-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy FlightSchedule
+    runs-on:
+      - self-hosted
+      - linux
+
+    steps:
+      - name: Update FlightSchedule
+        run: |
+          set -e
+
+          echo "=== Updating repository ==="
+          cd /root/flightschedule
+
+          rm package-lock.json
+
+          git pull
+
+          echo "=== Updating Docker ==="
+          docker compose up -d --build --remove-orphans
+
+          echo "=== Container status ==="
+          docker ps
+
+          echo "=== Deployment complete ==="
