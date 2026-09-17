@@ -17,7 +17,10 @@ try {
   if (error.code !== 'EEXIST') throw error;
   const recordedPid = Number(await fs.readFile(instanceLockPath, 'utf8').catch(() => 0));
   let running = false;
-  if (recordedPid > 0) { try { process.kill(recordedPid, 0); running = true; } catch { /* Stale lock file. */ } }
+  // A restarted container can reuse the previous Node process's PID while the
+  // lock file persists in the mounted data directory. That PID is this process,
+  // not a second running instance, so the persisted lock is safe to replace.
+  if (recordedPid > 0 && recordedPid !== process.pid) { try { process.kill(recordedPid, 0); running = true; } catch { /* Stale lock file. */ } }
   if (running) throw new Error(`FlightSchedule is already running with process ${recordedPid}. Stop it before starting another copy.`, { cause: error });
   await fs.unlink(instanceLockPath);
   instanceLock = await fs.open(instanceLockPath, 'wx', 0o600);
