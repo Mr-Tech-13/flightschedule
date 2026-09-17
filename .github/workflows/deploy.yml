@@ -24,8 +24,6 @@ jobs:
           echo "=== Updating repository ==="
           cd /root/flightschedule
 
-          rm package-lock.json
-
           git pull
 
           echo "=== Updating Docker ==="
