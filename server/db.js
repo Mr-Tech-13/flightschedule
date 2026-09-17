@@ -3,6 +3,29 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+async function processStartIdentity(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  try {
+    const stat = await fs.readFile(`/proc/${pid}/stat`, 'utf8');
+    // Fields after the process name begin at field 3; starttime is field 22.
+    const fields = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/);
+    return fields[19] || null;
+  } catch {
+    return null;
+  }
+}
+
+function parseInstanceLock(contents) {
+  try {
+    const lock = JSON.parse(contents);
+    if (Number.isInteger(lock.pid) && lock.pid > 0 && typeof lock.processStart === 'string') return lock;
+  } catch {
+    // Locks from versions before 1.0.0 only contain a PID. A PID can be reused
+    // after a container restart, so these legacy locks cannot prove ownership.
+  }
+  return null;
+}
+
 const dataDir = path.resolve(process.env.DATABASE_PATH || './data/flightschedule.pgdata');
 const legacyDataDir = path.resolve('./data', ['flight', 'deck.pgdata'].join(''));
 if (legacyDataDir !== dataDir && !(await fs.stat(dataDir).catch(() => null)) && await fs.stat(legacyDataDir).catch(() => null)) {
@@ -10,22 +33,32 @@ if (legacyDataDir !== dataDir && !(await fs.stat(dataDir).catch(() => null)) && 
 }
 await fs.mkdir(path.dirname(dataDir), { recursive: true });
 const instanceLockPath = `${dataDir}.lock`;
+const currentProcessStart = await processStartIdentity(process.pid);
 let instanceLock;
 try {
   instanceLock = await fs.open(instanceLockPath, 'wx', 0o600);
 } catch (error) {
   if (error.code !== 'EEXIST') throw error;
-  const recordedPid = Number(await fs.readFile(instanceLockPath, 'utf8').catch(() => 0));
+  const lock = parseInstanceLock(await fs.readFile(instanceLockPath, 'utf8').catch(() => ''));
   let running = false;
-  // A restarted container can reuse the previous Node process's PID while the
-  // lock file persists in the mounted data directory. That PID is this process,
-  // not a second running instance, so the persisted lock is safe to replace.
-  if (recordedPid > 0 && recordedPid !== process.pid) { try { process.kill(recordedPid, 0); running = true; } catch { /* Stale lock file. */ } }
-  if (running) throw new Error(`FlightSchedule is already running with process ${recordedPid}. Stop it before starting another copy.`, { cause: error });
+  if (lock) {
+    try {
+      process.kill(lock.pid, 0);
+      const recordedProcessStart = await processStartIdentity(lock.pid);
+      // Linux exposes a process start tick, which remains unique when Docker
+      // reuses a PID. On other platforms, retain the conservative PID check.
+      running = recordedProcessStart === null || recordedProcessStart === lock.processStart;
+      if (lock.pid === process.pid && recordedProcessStart === currentProcessStart) running = false;
+    } catch { /* Stale lock file. */ }
+  }
+  if (running) throw new Error(`FlightSchedule is already running with process ${lock.pid}. Stop it before starting another copy.`, { cause: error });
   await fs.unlink(instanceLockPath);
   instanceLock = await fs.open(instanceLockPath, 'wx', 0o600);
 }
-await instanceLock.writeFile(String(process.pid));
+await instanceLock.writeFile(JSON.stringify({
+  pid: process.pid,
+  processStart: currentProcessStart || `started-${Date.now()}`
+}));
 const database = await PGlite.create(dataDir);
 
 export const pool = {
