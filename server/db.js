@@ -1,5 +1,6 @@
 import { PGlite } from '@electric-sql/pglite';
 import crypto from 'node:crypto';
+import { Blob } from 'node:buffer';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -59,7 +60,7 @@ await instanceLock.writeFile(JSON.stringify({
   pid: process.pid,
   processStart: currentProcessStart || `started-${Date.now()}`
 }));
-const database = await PGlite.create(dataDir);
+let database = await PGlite.create(dataDir);
 
 export const pool = {
   query: (sql, params = []) => database.query(sql, params),
@@ -201,11 +202,53 @@ export async function createDatabaseBackup(prefix = 'nightly') {
   await fs.writeFile(path.join(backupDir, filename), Buffer.from(await blob.arrayBuffer()));
   const files = await fs.readdir(backupDir, { withFileTypes: true });
   const cutoff = Date.now() - 30 * 86400000;
-  await Promise.all(files.filter(file => file.isFile() && /^(nightly|manual)-.*\.tar\.gz$/.test(file.name)).map(async file => {
+  await Promise.all(files.filter(file => file.isFile() && /^(nightly|manual|pre-restore)-.*\.tar\.gz$/.test(file.name)).map(async file => {
     const target = path.join(backupDir, file.name);
     if ((await fs.stat(target)).mtimeMs < cutoff) await fs.unlink(target);
   }));
   return filename;
+}
+
+const validBackupName = /^(nightly|manual|pre-restore)-[A-Za-z0-9T-]+Z\.tar\.gz$/;
+const backupDirectory = () => path.resolve('./data/backups');
+
+export async function listDatabaseBackups() {
+  const backupDir = backupDirectory();
+  await fs.mkdir(backupDir, { recursive: true });
+  const entries = await fs.readdir(backupDir, { withFileTypes: true });
+  const backups = await Promise.all(entries.filter(entry => entry.isFile() && validBackupName.test(entry.name)).map(async entry => {
+    const stat = await fs.stat(path.join(backupDir, entry.name));
+    return { filename: entry.name, size: stat.size, createdAt: stat.mtime.toISOString() };
+  }));
+  return backups.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+export async function databaseBackupPath(filename) {
+  if (!validBackupName.test(String(filename || ''))) throw new Error('Invalid backup filename');
+  const target = path.join(backupDirectory(), filename);
+  const stat = await fs.stat(target).catch(() => null);
+  if (!stat?.isFile()) throw new Error('Backup not found');
+  return target;
+}
+
+export async function restoreDatabaseBackup(filename) {
+  const source = await databaseBackupPath(filename);
+  await createDatabaseBackup('pre-restore');
+  const archive = new Blob([await fs.readFile(source)]);
+  const previousDir = `${dataDir}.before-restore-${Date.now()}`;
+  await database.close();
+  await fs.rename(dataDir, previousDir);
+  try {
+    database = await PGlite.create({ dataDir, loadDataDir: archive });
+    await migrate();
+    await fs.rm(previousDir, { recursive: true, force: true });
+  } catch (error) {
+    await database?.close().catch(() => {});
+    await fs.rm(dataDir, { recursive: true, force: true });
+    await fs.rename(previousDir, dataDir);
+    database = await PGlite.create(dataDir);
+    throw error;
+  }
 }
 
 export async function closeDatabase() {
