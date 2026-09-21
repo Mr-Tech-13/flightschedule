@@ -181,6 +181,8 @@ export async function migrate() {
     ALTER TABLE employees ADD COLUMN IF NOT EXISTS customs_seal boolean NOT NULL DEFAULT false;
     ALTER TABLE airlines ADD COLUMN IF NOT EXISTS international boolean NOT NULL DEFAULT false;
     ALTER TABLE flights ADD COLUMN IF NOT EXISTS international boolean NOT NULL DEFAULT false;
+    ALTER TABLE issues ADD COLUMN IF NOT EXISTS closed_at timestamptz;
+    ALTER TABLE issues ADD COLUMN IF NOT EXISTS closed_by uuid REFERENCES accounts(id);
   `);
   await pool.query("SELECT set_config('TimeZone',$1,false)", [process.env.DEFAULT_TIMEZONE || 'America/New_York']);
   await pool.query("INSERT INTO settings(key,value) VALUES ('station', $1), ('timezone', $2) ON CONFLICT DO NOTHING", [JSON.stringify(process.env.DEFAULT_STATION || 'Station'), JSON.stringify(process.env.DEFAULT_TIMEZONE || 'America/New_York')]);
