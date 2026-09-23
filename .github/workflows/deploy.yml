@@ -28,7 +28,7 @@ jobs:
           git pull
 
           echo "=== Updating Docker ==="
-          docker compose up -d --build --remove-orphans
+          docker restart flightschedule-app-1
 
           echo "=== Container status ==="
           docker ps
