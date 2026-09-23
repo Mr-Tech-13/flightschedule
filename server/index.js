@@ -4,7 +4,7 @@ import cookieParser from 'cookie-parser';
 import multer from 'multer';
 import bcrypt from 'bcryptjs';
 import readXlsxFile from 'read-excel-file/node';
-import { parseEmployeeRows } from './employee-schedule-parser.js';
+import { parseEmployeeRows, normalizeWeekStart } from './employee-schedule-parser.js';
 import { createWorker } from 'tesseract.js';
 import path from 'node:path';
 import fs from 'node:fs/promises';
@@ -20,6 +20,13 @@ const upload = multer({ dest: path.join(root, 'data/uploads'), limits: { fileSiz
 const brandingUpload = multer({ dest: path.join(root, 'data/uploads'), limits: { fileSize: 3 * 1024 * 1024, files: 2 } });
 const brandingDir = path.join(root, 'data/branding');
 const app = express();
+async function sendDiscordNotification(content) {
+  if (!process.env.DISCORD_WEBHOOK_URL) return;
+  try {
+    const response = await fetch(process.env.DISCORD_WEBHOOK_URL, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: String(content).slice(0, 1900), allowed_mentions: { parse: [] } }), signal: globalThis.AbortSignal.timeout(5000) });
+    if (!response.ok) console.error(`Discord webhook returned ${response.status}`);
+  } catch (error) { console.error('Discord webhook failed', error.message); }
+}
 app.disable('x-powered-by');
 app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], scriptSrc: ["'self'", "'unsafe-inline'"], styleSrc: ["'self'", "'unsafe-inline'"] } } }));
 app.use(express.json({ limit: '1mb' })); app.use(cookieParser());
@@ -27,6 +34,19 @@ app.post('/api/auth/login', login); app.post('/api/auth/logout', logout);
 app.use('/branding', express.static(brandingDir, { fallthrough: false, maxAge: '1h' }));
 app.get('/api/branding', async(req,res,next)=>{try{const result=await pool.query("SELECT key,value FROM settings WHERE key='app_icon'");res.json(Object.fromEntries(result.rows.map(item=>[item.key,item.value])))}catch(error){next(error)}});
 app.use('/api', authenticate);
+app.use('/api', (req,res,next) => {
+  const sendJson = res.json.bind(res);
+  res.json = body => {
+    if (body?.error && !res.locals.failureMessage) res.locals.failureMessage = String(body.error);
+    return sendJson(body);
+  };
+  res.once('finish', () => {
+    if (res.statusCode < 400 || !req.account || !process.env.DISCORD_WEBHOOK_URL) return;
+    const detail = res.locals.failureMessage || `HTTP ${res.statusCode}`;
+    void sendDiscordNotification(`FlightSchedule request failed\n${req.method} ${req.path}\nStatus: ${res.statusCode}\nAccount: ${req.account.username} (${req.account.role})\nError: ${detail}\nTime: ${new Date().toISOString()}`);
+  });
+  next();
+});
 
 app.get('/api/me', (req,res) => res.json({ account: req.account }));
 app.get('/api/dashboard', async (req,res,next) => { try {
@@ -76,15 +96,15 @@ app.post('/api/callouts', allow('admin','scheduler'), async(req,res,next)=>{try{
 app.delete('/api/callouts/:employeeId/:date', allow('admin','scheduler'), async(req,res,next)=>{try{await pool.query('DELETE FROM callouts WHERE employee_id=$1 AND work_date=$2',[req.params.employeeId,req.params.date]);res.status(204).end()}catch(e){next(e)}});
 
 app.post('/api/employees/import', allow('admin'), upload.single('file'), async(req,res,next)=>{try{
-  let rows=[],parsed; const ext=path.extname(req.file.originalname).toLowerCase();
+  let rows=[],parsed; const ext=path.extname(req.file.originalname).toLowerCase(),weekStart=normalizeWeekStart(req.body.weekStart);
   if(ext==='.xlsx') rows=await readXlsxFile(req.file.path);
   else if(ext==='.csv') rows=parseCsv(await fs.readFile(req.file.path,'utf8'));
-  else {const worker=await createWorker('eng');const out=await worker.recognize(req.file.path,{}, {tsv:true});await worker.terminate();parsed=parseScheduleTsv(out.data.tsv,req.body.weekStart);}
-  await fs.unlink(req.file.path).catch(()=>{}); parsed??=parseEmployeeRows(rows,req.body.weekStart); res.json({preview:parsed});
+  else {const worker=await createWorker('eng');const out=await worker.recognize(req.file.path,{}, {tsv:true});await worker.terminate();parsed=parseScheduleTsv(out.data.tsv,weekStart);}
+  await fs.unlink(req.file.path).catch(()=>{}); parsed??=parseEmployeeRows(rows,weekStart); res.json({preview:parsed,weekStart});
 }catch(e){next(e)}});
-app.post('/api/employees/import/commit', allow('admin'), async(req,res,next)=>{try{const incoming=req.body.employees||[];const importId=id();await tx(async c=>{
+app.post('/api/employees/import/commit', allow('admin'), async(req,res,next)=>{try{const incoming=req.body.employees||[],weekStart=normalizeWeekStart(req.body.weekStart),weekEnd=new Date(`${weekStart}T12:00:00`);weekEnd.setDate(weekEnd.getDate()+6);const importId=id();await tx(async c=>{
   await c.query('UPDATE employees SET pending_deletion=true WHERE deleted_at IS NULL');
-  for(const e of incoming){const normalized=e.name.trim().toLowerCase();const er=await c.query(`INSERT INTO employees(id,name,normalized_name,primary_role,eligible_roles,pending_deletion,customs_seal) VALUES($1,$2,$3,$4,$5,false,$6) ON CONFLICT(normalized_name) DO UPDATE SET name=EXCLUDED.name,primary_role=EXCLUDED.primary_role,eligible_roles=EXCLUDED.eligible_roles,pending_deletion=false,customs_seal=EXCLUDED.customs_seal,updated_at=now() RETURNING id`,[id(),e.name,normalized,e.role||'agent',[e.role||'agent'],!!e.customsSeal]);for(const s of e.shifts||[]) await c.query(`INSERT INTO shifts(id,employee_id,work_date,starts_at,ends_at,source,import_id) VALUES($1,$2,$3,$4,$5,'import',$6) ON CONFLICT(employee_id,work_date) DO UPDATE SET starts_at=EXCLUDED.starts_at,ends_at=EXCLUDED.ends_at,source='import',import_id=EXCLUDED.import_id`,[id(),er.rows[0].id,s.date,s.start,s.end,importId]);}
+  for(const e of incoming){const normalized=e.name.trim().toLowerCase();const er=await c.query(`INSERT INTO employees(id,name,normalized_name,primary_role,eligible_roles,pending_deletion,customs_seal) VALUES($1,$2,$3,$4,$5,false,$6) ON CONFLICT(normalized_name) DO UPDATE SET name=EXCLUDED.name,primary_role=EXCLUDED.primary_role,eligible_roles=EXCLUDED.eligible_roles,pending_deletion=false,customs_seal=EXCLUDED.customs_seal,updated_at=now() RETURNING id`,[id(),e.name,normalized,e.role||'agent',[e.role||'agent'],!!e.customsSeal]);await c.query("DELETE FROM shifts WHERE employee_id=$1 AND work_date BETWEEN $2 AND $3 AND source='import'",[er.rows[0].id,weekStart,weekEnd.toISOString().slice(0,10)]);for(const s of e.shifts||[]) await c.query(`INSERT INTO shifts(id,employee_id,work_date,starts_at,ends_at,source,import_id) VALUES($1,$2,$3,$4,$5,'import',$6) ON CONFLICT(employee_id,work_date) DO UPDATE SET starts_at=EXCLUDED.starts_at,ends_at=EXCLUDED.ends_at,source='import',import_id=EXCLUDED.import_id`,[id(),er.rows[0].id,s.date,s.start,s.end,importId]);}
   await c.query(`INSERT INTO imports(id,kind,status,summary) VALUES($1,'employees','complete',$2)`,[importId,JSON.stringify({employees:incoming.length})]);});res.status(201).json({imported:incoming.length})}catch(e){next(e)}});
 
 app.get('/api/admin', allow('admin'), async(req,res,next)=>{try{const [accounts,airlines,issues,settings]=await Promise.all([pool.query('SELECT id,username,role,active,employee_id FROM accounts ORDER BY username'),pool.query('SELECT * FROM airlines ORDER BY code'),pool.query(`SELECT i.*,reporter.username reported_by_username,closer.username closed_by_username
@@ -94,7 +114,7 @@ app.post('/api/admin/accounts', allow('admin'), async(req,res,next)=>{try{res.st
 app.patch('/api/admin/accounts/:id', allow('admin'), async(req,res,next)=>{try{const a=req.body,current=await pool.query('SELECT * FROM accounts WHERE id=$1',[req.params.id]);if(!current.rows.length)return res.status(404).json({error:'Account not found'});if(req.params.id===req.account.id&&a.active===false)return res.status(400).json({error:'You cannot deactivate your own account'});if(current.rows[0].role==='admin'&&((a.role&&a.role!=='admin')||a.active===false)){const admins=await pool.query("SELECT count(*)::int count FROM accounts WHERE role='admin' AND active=true");if(Number(admins.rows[0].count)<=1)return res.status(400).json({error:'At least one active administrator is required'})}if(a.password!==undefined&&String(a.password).length<12)return res.status(400).json({error:'New password must be at least 12 characters'});const hash=a.password?await bcrypt.hash(String(a.password),12):null;const r=await pool.query(`UPDATE accounts SET username=COALESCE($2,username),role=COALESCE($3,role),active=COALESCE($4,active),password_hash=COALESCE($5,password_hash) WHERE id=$1 RETURNING id,username,role,active,employee_id`,[req.params.id,a.username?.trim().toLowerCase()||null,a.role||null,a.active,hash]);if(hash)await pool.query('DELETE FROM sessions WHERE account_id=$1',[req.params.id]);res.json(publicAccount(r.rows[0]))}catch(e){next(e)}});
 app.delete('/api/admin/accounts/:id', allow('admin'), async(req,res,next)=>{try{if(req.params.id===req.account.id)return res.status(400).json({error:'You cannot delete your own account'});const current=await pool.query('SELECT role,active FROM accounts WHERE id=$1',[req.params.id]);if(!current.rows.length)return res.status(404).json({error:'Account not found'});if(current.rows[0].role==='admin'&&current.rows[0].active){const admins=await pool.query("SELECT count(*)::int count FROM accounts WHERE role='admin' AND active=true");if(Number(admins.rows[0].count)<=1)return res.status(400).json({error:'At least one active administrator is required'})}await pool.query('DELETE FROM accounts WHERE id=$1',[req.params.id]);res.status(204).end()}catch(e){next(e)}});
 app.post('/api/admin/airlines', allow('admin'), async(req,res,next)=>{try{const a=req.body;const r=await pool.query(`INSERT INTO airlines(code,name,lead_required,agent_required,arrival_lead_minutes,post_departure_minutes,international) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(code) DO UPDATE SET name=EXCLUDED.name,lead_required=EXCLUDED.lead_required,agent_required=EXCLUDED.agent_required,arrival_lead_minutes=EXCLUDED.arrival_lead_minutes,post_departure_minutes=EXCLUDED.post_departure_minutes,international=EXCLUDED.international RETURNING *`,[a.code.toUpperCase(),a.name,Number(a.leadRequired),Number(a.agentRequired),Number(a.arrivalLeadMinutes||15),Number(a.postDepartureMinutes||10),!!a.international]);res.json(r.rows[0])}catch(e){next(e)}});
-app.post('/api/issues', async(req,res,next)=>{try{const i=req.body,detail=String(i.detail||'').trim();if(!detail)return res.status(400).json({error:'Issue details are required'});const title=String(i.title||'').trim()||'Issue report';const r=await pool.query('INSERT INTO issues(id,title,detail,reported_by) VALUES($1,$2,$3,$4) RETURNING *',[id(),title,detail,req.account.id]);if(process.env.DISCORD_WEBHOOK_URL) fetch(process.env.DISCORD_WEBHOOK_URL,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({content:`FlightSchedule issue\n${detail}`})}).catch(()=>{});res.status(201).json(r.rows[0])}catch(e){next(e)}});
+app.post('/api/issues', async(req,res,next)=>{try{const i=req.body,detail=String(i.detail||'').trim();if(!detail)return res.status(400).json({error:'Issue details are required'});const title=String(i.title||'').trim()||'Issue report';const r=await pool.query('INSERT INTO issues(id,title,detail,reported_by) VALUES($1,$2,$3,$4) RETURNING *',[id(),title,detail,req.account.id]);void sendDiscordNotification(`FlightSchedule issue\n${detail}`);res.status(201).json(r.rows[0])}catch(e){next(e)}});
 app.patch('/api/admin/issues/:id', allow('admin'), async(req,res,next)=>{try{if(req.body.status!=='closed')return res.status(400).json({error:'Issue status must be closed'});const r=await pool.query("UPDATE issues SET status='closed',closed_at=now(),closed_by=$2 WHERE id=$1 AND status='open' RETURNING *",[req.params.id,req.account.id]);if(!r.rows.length)return res.status(404).json({error:'Open issue not found'});res.json(r.rows[0])}catch(e){next(e)}});
 app.post('/api/admin/backup', allow('admin'), async(req,res,next)=>{try{const filename=await createDatabaseBackup('manual');res.status(201).json({message:`Backup created: ${filename}`})}catch(e){next(e)}});
 app.get('/api/admin/backups', allow('admin'), async(req,res,next)=>{try{res.json({backups:await listDatabaseBackups()})}catch(e){next(e)}});
@@ -104,7 +124,7 @@ app.post('/api/admin/branding', allow('admin'), brandingUpload.single('appIcon')
 app.delete('/api/admin/branding/icon', allow('admin'), async(req,res,next)=>{try{for(const extension of ['png','jpg','webp','ico'])await fs.unlink(path.join(brandingDir,`app_icon.${extension}`)).catch(()=>{});await pool.query("DELETE FROM settings WHERE key='app_icon'");res.status(204).end()}catch(error){next(error)}});
 
 app.use(express.static(path.join(root,'public'))); app.get('/{*splat}',(_,res)=>res.sendFile(path.join(root,'public','index.html')));
-app.use((err,req,res,_next)=>{console.error(err);res.status(err.code==='LIMIT_FILE_SIZE'?413:400).json({error:process.env.NODE_ENV==='production'?'The request could not be completed':err.message})});
+app.use((err,req,res,_next)=>{console.error(err);res.locals.failureMessage=err.message||err.name||'Unknown server error';res.status(err.code==='LIMIT_FILE_SIZE'?413:400).json({error:process.env.NODE_ENV==='production'?'The request could not be completed':res.locals.failureMessage})});
 
 function parseCsv(text){const rows=[];let row=[],cell='',quoted=false;for(let i=0;i<text.length;i++){const ch=text[i];if(ch==='"'){if(quoted&&text[i+1]==='"'){cell+='"';i++}else quoted=!quoted}else if(ch===','&&!quoted){row.push(cell);cell=''}else if((ch==='\n'||ch==='\r')&&!quoted){if(ch==='\r'&&text[i+1]==='\n')i++;row.push(cell);if(row.some(x=>x!==''))rows.push(row);row=[];cell=''}else cell+=ch}row.push(cell);if(row.some(x=>x!==''))rows.push(row);return rows}
 function detectBrandImage(bytes){if(bytes.length>=8&&bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])))return'png';if(bytes.length>=3&&bytes[0]===255&&bytes[1]===216&&bytes[2]===255)return'jpg';if(bytes.length>=12&&bytes.subarray(0,4).toString()==='RIFF'&&bytes.subarray(8,12).toString()==='WEBP')return'webp';if(bytes.length>=4&&bytes[0]===0&&bytes[1]===0&&bytes[2]===1&&bytes[3]===0)return'ico';return null}

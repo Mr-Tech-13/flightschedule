@@ -16,10 +16,17 @@ export function unwrapWorkbookRows(workbook) {
   return workbook;
 }
 
+export function normalizeWeekStart(value) {
+  const parsed = /^\d{4}-\d{2}-\d{2}$/.test(String(value || '')) ? new Date(`${value}T12:00:00`) : new Date();
+  const offset = (parsed.getDay() + 6) % 7;
+  parsed.setDate(parsed.getDate() - offset);
+  return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}-${String(parsed.getDate()).padStart(2, '0')}`;
+}
+
 export function parseEmployeeRows(input, weekStart) {
   const rows = unwrapWorkbookRows(input);
   const result = [];
-  const start = new Date(`${weekStart || new Date().toISOString().slice(0, 10)}T12:00:00`);
+  const start = new Date(`${normalizeWeekStart(weekStart)}T12:00:00`);
   let role = 'agent';
 
   for (const row of rows) {
@@ -43,7 +50,7 @@ export function parseEmployeeRows(input, weekStart) {
       if (shiftEnd <= shiftStart) endDate.setDate(endDate.getDate() + 1);
       shifts.push({ date: workDate, start: `${workDate}T${shiftStart}:00`, end: `${endDate.toISOString().slice(0, 10)}T${shiftEnd}:00` });
     }
-    if (shifts.length) result.push({ name, role, customsSeal, shifts });
+    result.push({ name, role, customsSeal, shifts });
   }
   return result;
 }
