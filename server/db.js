@@ -201,7 +201,7 @@ export async function createDatabaseBackup(prefix = 'nightly') {
   const filename = `${prefix}-${stamp}.tar.gz`;
   await fs.writeFile(path.join(backupDir, filename), Buffer.from(await blob.arrayBuffer()));
   const files = await fs.readdir(backupDir, { withFileTypes: true });
-  const cutoff = Date.now() - 30 * 86400000;
+  const cutoff = Date.now() - 7 * 86400000;
   await Promise.all(files.filter(file => file.isFile() && /^(nightly|manual|pre-restore)-.*\.tar\.gz$/.test(file.name)).map(async file => {
     const target = path.join(backupDir, file.name);
     if ((await fs.stat(target)).mtimeMs < cutoff) await fs.unlink(target);

@@ -31,7 +31,7 @@ Run `docker compose up -d`. Compose uses a published Node image and does not bui
 - `data/backups/` contains nightly and manual compressed database backups.
 - `private/` is ignored by Git and intended for source schedules and screenshots.
 
-Nightly backups retain the latest 30 days. Copy the entire `data` directory to separate storage regularly; a backup kept only on the same server is not protection from disk failure.
+Nightly, manual, and pre-restore backups are retained for 7 days. Copy the entire `data` directory to separate storage regularly; a backup kept only on the same server is not protection from disk failure.
 
 ## Initial workflow
 
